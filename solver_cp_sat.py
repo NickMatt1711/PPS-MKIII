@@ -679,6 +679,30 @@ def build_and_solve_model(
     for grade, closing_deficit_var in closing_inventory_deficit_penalties.items():
         objective_terms.append(stockout_penalty * closing_deficit_var * 3)
     
+    # 4a. Run-split penalties (SOFT)
+    # A "split" occurs when grade G runs on day d-1, is interrupted on day d by another grade,
+    # then resumes on day d+1. This costs 2 transitions (out + back in) but the solver
+    # has no signal to prefer boundary placement over mid-run insertion.
+    # Adding a split penalty equal to transition_penalty makes boundary placement preferred
+    # by exactly 1 penalty unit over mid-run splits.
+    for line in lines:
+        for grade in grades:
+            if line not in allowed_lines[grade]:
+                continue
+            for d in range(1, num_days - 1):
+                var_prev = get_is_producing_var(grade, line, d - 1)
+                var_curr = get_is_producing_var(grade, line, d)
+                var_next = get_is_producing_var(grade, line, d + 1)
+                if var_prev is None or var_curr is None or var_next is None:
+                    continue
+                split_var = model.NewBoolVar(f'split_{grade}_{line}_{d}')
+                # split_var = 1 iff prev=1, curr=0, next=1
+                model.Add(split_var <= var_prev)
+                model.Add(split_var <= 1 - var_curr)
+                model.Add(split_var <= var_next)
+                model.Add(split_var >= var_prev + (1 - var_curr) + var_next - 2)
+                objective_terms.append(transition_penalty * split_var)
+
     # 4. Transition penalties (SOFT - for ALLOWED transitions only)
     # Forbidden transitions are already prevented by HARD constraints
     for line in lines:
