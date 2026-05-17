@@ -760,36 +760,13 @@ def build_and_solve_model(
     if progress_callback:
         progress_callback(0.8, "Solving optimization problem...")
     
-    # ========== SEARCH STRATEGY: prioritize early scheduling of low-inventory grades ==========
-    # Grades whose opening inventory covers fewer days get their is_producing vars
-    # scheduled first (CHOOSE_FIRST = prefer day 0, SELECT_MIN_VALUE = try producing early).
-    # This guides CP-SAT toward low-stockout solutions without adding constraints.
-    urgent_vars = []
-    for grade in grades:
-        days_cover = int(initial_inventory.get(grade, 0) // max(1, max(
-            demand_data[grade].get(d, 0) for d in dates
-        ))) if demand_data.get(grade) else 999
-        if days_cover < 5:  # grade will stockout within 5 days without production
-            for d in range(min(10, num_days)):  # hint for first 10 days
-                for line in allowed_lines.get(grade, []):
-                    key = (grade, line, d)
-                    if key in is_producing:
-                        urgent_vars.append(is_producing[key])
-
-    if urgent_vars:
-        model.AddDecisionStrategy(
-            urgent_vars,
-            cp_model.CHOOSE_FIRST,
-            cp_model.SELECT_MAX_VALUE  # try producing (=1) before not producing
-        )
-
     # Solve
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_min * 60.0
     solver.parameters.num_search_workers = SOLVER_NUM_WORKERS
     solver.parameters.random_seed = SOLVER_RANDOM_SEED
     solver.parameters.log_search_progress = True
-    solver.parameters.search_branching = cp_model.PORTFOLIO_WITH_QUICK_RESTART    
+    
     solution_callback = SolutionCallback(
         production, inventory_vars, stockout_vars, is_producing,
         grades, lines, dates, formatted_dates, num_days,
